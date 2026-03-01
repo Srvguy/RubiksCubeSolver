@@ -349,38 +349,54 @@ function rgbToHsv(r,g,b) {
 function classifyColor(r,g,b) {
   const {h,s,v} = rgbToHsv(r,g,b);
 
-  // White: very low saturation + bright
-  if (s < 0.15 && v > 0.72) return 'W';
-  // Dark shadow — treat as white (shadowed white tile)
+  // ── Step 1: Brightness/saturation gates ──
+  // Very dark → shadowed tile, call white
   if (v < 0.18) return 'W';
 
-  // ── Hue-based classification ──
+  // ── Step 2: Yellow vs White tie-breaker ──
+  // This is the hardest pair. Under a torch, yellow tiles go very bright
+  // and can drop below the saturation threshold for yellow.
+  // Key insight: yellow always has R >> B (warm bias).
+  // True white has R ≈ G ≈ B (balanced channels).
+  // We check this ratio BEFORE the generic white test so yellow isn't swallowed.
+  const rb = b > 0 ? r / b : 99;   // red-to-blue ratio
+  const rg = g > 0 ? r / g : 99;
+  if (rb > 1.25 && rg > 0.85 && v > 0.55) {
+    // Noticeably warmer than white — classify by hue
+    if (h >= 10 && h < 42) {
+      // Orange vs yellow — saturation decides
+      if (s > 0.60) return 'O';
+      if (s > 0.18) return 'Y';   // washed-out gold still counts as yellow
+    }
+    if (h >= 42 && h < 72) return 'Y';
+  }
+
+  // ── Step 3: True white — balanced channels, bright ──
+  if (s < 0.18 && v > 0.68) return 'W';
+
+  // ── Step 4: Normal hue-based classification ──
   // Red wraps at 0°/360°
   if ((h >= 345 || h < 10) && s > 0.40) return 'R';
 
-  // Orange: 10–32°. Must be highly saturated.
-  // Gold/yellow starts ~38°+ and has slightly lower sat under warm light.
+  // Orange: 10–32°, highly saturated
   if (h >= 10 && h < 32 && s > 0.55) return 'O';
 
-  // Tie-breaker zone 32–42°: could be orange OR gold depending on saturation
-  // Orange stickers are very saturated (s > 0.75), gold/yellow less so
-  if (h >= 32 && h < 42) {
-    return (s > 0.72) ? 'O' : 'Y';
-  }
+  // Tie-breaker 32–42°: orange is very saturated, gold/yellow less so
+  if (h >= 32 && h < 42) return (s > 0.72) ? 'O' : 'Y';
 
-  // Yellow / Gold: 42–72°
-  if (h >= 42 && h < 72 && s > 0.35) return 'Y';
+  // Yellow/Gold: 42–72°
+  if (h >= 42 && h < 72 && s > 0.30) return 'Y';
 
   // Green: 72–165°
   if (h >= 72 && h < 165 && s > 0.25) return 'G';
 
-  // Blue: 165–270° — now maps to deep royal blue in display
+  // Blue: 165–270°
   if (h >= 165 && h < 270 && s > 0.25) return 'B';
 
   // Pinkish/magenta red: 270–345°
   if (h >= 270 && h < 345 && s > 0.30) return 'R';
 
-  // Low-sat fallback = white
+  // Fallback
   return 'W';
 }
 
@@ -400,19 +416,34 @@ async function startCam() {
     // Store the video track so we can control the torch
     camTrack = stream.getVideoTracks()[0];
 
-    // Hide torch button if torch not supported
-    const caps = camTrack.getCapabilities ? camTrack.getCapabilities() : {};
-    if (!caps.torch) {
-      const btn = document.getElementById('torchBtn');
-      if (btn) btn.style.display = 'none';
-    }
-
     // Start loop once video is playing
     const waitPlaying = setInterval(() => {
-      if (vid.videoWidth > 0) { clearInterval(waitPlaying); runLoop(); }
+      if (vid.videoWidth > 0) {
+        clearInterval(waitPlaying);
+        runLoop();
+        // Auto-enable torch after a short delay (some devices need stream to settle)
+        setTimeout(() => enableTorch(), 600);
+      }
     }, 100);
   } catch(e) {
     setMsg('Camera unavailable — enter colors manually below', 'warn');
+  }
+}
+
+async function enableTorch() {
+  if (!camTrack) return;
+  const caps = camTrack.getCapabilities ? camTrack.getCapabilities() : {};
+  const btn = document.getElementById('torchBtn');
+  if (!caps.torch) {
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+  try {
+    await camTrack.applyConstraints({ advanced: [{ torch: true }] });
+    torchOn = true;
+    if (btn) btn.classList.add('on');
+  } catch(e) {
+    // Torch failed silently — button still available for manual toggle
   }
 }
 
@@ -540,25 +571,20 @@ function runLoop() {
 
         sampled[r][c] = detectedColor;
 
-        // Draw a large filled rounded rect showing the sampled raw color,
-        // with the classified color name as a small label
-        const pad = cell * 0.12;
-        const rw = cell - pad*2, rh = cell - pad*2;
-        const rx = cx - rw/2, ry = cy - rh/2;
-        const radius = rw * 0.18;
-
-        // Filled rect in raw camera color
-        ctx.fillStyle = `rgb(${rawR},${rawG},${rawB})`;
-        roundRect(ctx, rx, ry, rw, rh, radius); ctx.fill();
-
-        // Border — white normally, yellow for center cell
-        ctx.strokeStyle = (r===1&&c===1) ? 'rgba(255,209,102,0.9)' : 'rgba(255,255,255,0.7)';
-        ctx.lineWidth = (r===1&&c===1) ? 2 : 1.5;
-        roundRect(ctx, rx, ry, rw, rh, radius); ctx.stroke();
-
-        // Small color-name label inside
-        ctx.fillStyle = 'rgba(0,0,0,0.65)';
-        ctx.font = `700 ${Math.round(cell*0.22)}px Space Mono,monospace`;
+        // Draw a small solid circle showing the detected color — opaque so it's easy to read
+        // The circle is small enough that you can still see the cube tile behind it
+        const dotR = cell * 0.22;
+        ctx.beginPath();
+        ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+        ctx.fillStyle = COLOR_HEX[detectedColor] || `rgb(${rawR},${rawG},${rawB})`;
+        ctx.fill();
+        // Thin white ring + color initial so it's unambiguous
+        ctx.strokeStyle = (r===1&&c===1) ? 'rgba(255,209,102,1)' : 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Letter label inside circle
+        ctx.fillStyle = detectedColor === 'W' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.9)';
+        ctx.font = `700 ${Math.round(dotR * 1.1)}px Space Mono,monospace`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(detectedColor, cx, cy);
       }
