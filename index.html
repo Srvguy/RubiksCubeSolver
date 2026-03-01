@@ -396,7 +396,51 @@ function classifyColor(r,g,b) {
   return 'W';
 }
 
-let torchOn = false;
+// ── Learned color palette ─────────────────────
+// Stores average RGB for each color label once confirmed by locking a face.
+// Format: { 'R': {r,g,b,n}, 'Y': {r,g,b,n}, ... }
+// Once a color is learned, RGB distance to learned values takes priority over HSV rules.
+const learnedColors = {};
+
+// Call this when a face is locked — accumulates the average RGB for each
+// color label seen on that face into learnedColors.
+function learnFaceColors(face) {
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const label = cube[face][r][c];
+      const rgb = lastSampledRGB[face] && lastSampledRGB[face][r] && lastSampledRGB[face][r][c];
+      if (!rgb || !label) continue;
+      if (!learnedColors[label]) {
+        learnedColors[label] = { r: rgb.r, g: rgb.g, b: rgb.b, n: 1 };
+      } else {
+        // Running average
+        const lc = learnedColors[label];
+        lc.n++;
+        lc.r += (rgb.r - lc.r) / lc.n;
+        lc.g += (rgb.g - lc.g) / lc.n;
+        lc.b += (rgb.b - lc.b) / lc.n;
+      }
+    }
+  }
+}
+
+// Compare pixel to all learned colors. Returns the closest label if within
+// threshold, otherwise returns null (fall back to HSV).
+function matchLearned(r, g, b) {
+  let bestLabel = null, bestDist = 60 * 60 * 3; // max allowed distance²
+  for (const [label, lc] of Object.entries(learnedColors)) {
+    const d = (r-lc.r)**2 + (g-lc.g)**2 + (b-lc.b)**2;
+    if (d < bestDist) { bestDist = d; bestLabel = label; }
+  }
+  return bestLabel;
+}
+
+// Store last sampled RGB per face/cell so learnFaceColors can use them
+// Format: lastSampledRGB[face][row][col] = {r,g,b}
+const lastSampledRGB = {};
+FACES.forEach(f => {
+  lastSampledRGB[f] = Array.from({length:3}, () => Array(3).fill(null));
+});
 let camTrack = null;   // MediaStreamTrack for torch control
 
 // ── Camera ────────────────────────────────────
@@ -528,44 +572,56 @@ function runLoop() {
         let detectedColor;
         let rawR = 0, rawG = 0, rawB = 0;
 
-        if (r===1 && c===1) {
-          // Center cell — color is ALWAYS fixed, no classification
-          detectedColor = CENTER_COLOR[currentFace];
-          // rawR/G/B stay 0 — we don't need the raw color for display
-        } else {
-          // Sample the inner 60% of each cell area (avoids grid-line edges)
-          const sampleW = Math.floor(cell * 0.60 * sx);
-          const sampleH = Math.floor(cell * 0.60 * sy);
-          const px0 = Math.max(0, Math.round(cx*sx - sampleW/2));
-          const py0 = Math.max(0, Math.round(cy*sy - sampleH/2));
-          const sw  = Math.min(sampleW, tmp.width  - px0);
-          const sh  = Math.min(sampleH, tmp.height - py0);
+        // Sample the inner 60% of the cell area for all 9 cells including center
+        const sampleW = Math.floor(cell * 0.60 * sx);
+        const sampleH = Math.floor(cell * 0.60 * sy);
+        const px0 = Math.max(0, Math.round(cx*sx - sampleW/2));
+        const py0 = Math.max(0, Math.round(cy*sy - sampleH/2));
+        const sw  = Math.min(sampleW, tmp.width  - px0);
+        const sh  = Math.min(sampleH, tmp.height - py0);
+        if (sw > 0 && sh > 0) {
+          const imgData = tc.getImageData(px0, py0, sw, sh).data;
           let n = 0;
-          if (sw > 0 && sh > 0) {
-            const imgData = tc.getImageData(px0, py0, sw, sh).data;
-            for (let i = 0; i < imgData.length; i += 4) {
-              rawR += imgData[i]; rawG += imgData[i+1]; rawB += imgData[i+2]; n++;
-            }
-            if (n > 0) { rawR = Math.round(rawR/n); rawG = Math.round(rawG/n); rawB = Math.round(rawB/n); }
+          for (let i = 0; i < imgData.length; i += 4) {
+            rawR += imgData[i]; rawG += imgData[i+1]; rawB += imgData[i+2]; n++;
           }
-          detectedColor = classifyColor(rawR, rawG, rawB);
+          if (n > 0) { rawR = Math.round(rawR/n); rawG = Math.round(rawG/n); rawB = Math.round(rawB/n); }
+        }
+
+        // Store raw RGB for learning later
+        if (!lastSampledRGB[currentFace][r]) lastSampledRGB[currentFace][r] = [];
+        lastSampledRGB[currentFace][r][c] = {r: rawR, g: rawG, b: rawB};
+
+        if (r===1 && c===1) {
+          // Center cell: color is fixed for cube state, but we still show the
+          // live camera color in both the canvas circle AND the editor square
+          detectedColor = CENTER_COLOR[currentFace];
+        } else {
+          // Try learned palette first (more accurate once colors are known)
+          detectedColor = matchLearned(rawR, rawG, rawB) || classifyColor(rawR, rawG, rawB);
         }
 
         sampled[r][c] = detectedColor;
 
-        // Draw a small solid circle showing the detected color — opaque so it's easy to read
-        // The circle is small enough that you can still see the cube tile behind it
+        // Draw circle: center cell uses raw camera fill so it looks live,
+        // other cells use the classified color hex so it's clear what was detected
         const dotR = cell * 0.22;
         ctx.beginPath();
         ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
-        ctx.fillStyle = COLOR_HEX[detectedColor] || `rgb(${rawR},${rawG},${rawB})`;
+        if (r===1 && c===1) {
+          // Show actual camera color so user can see what the camera sees
+          ctx.fillStyle = rawR || rawG || rawB
+            ? `rgb(${rawR},${rawG},${rawB})`
+            : COLOR_HEX[detectedColor];
+        } else {
+          ctx.fillStyle = COLOR_HEX[detectedColor] || `rgb(${rawR},${rawG},${rawB})`;
+        }
         ctx.fill();
-        // Thin white ring + color initial so it's unambiguous
         ctx.strokeStyle = (r===1&&c===1) ? 'rgba(255,209,102,1)' : 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = (r===1&&c===1) ? 2 : 1.5;
         ctx.stroke();
-        // Letter label inside circle
-        ctx.fillStyle = detectedColor === 'W' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.9)';
+        // Letter label
+        ctx.fillStyle = detectedColor === 'W' ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.92)';
         ctx.font = `700 ${Math.round(dotR * 1.1)}px Space Mono,monospace`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(detectedColor, cx, cy);
@@ -667,16 +723,25 @@ function renderEditor() {
 }
 
 // Update editor cell backgrounds from sampled array — no DOM rebuild.
-// Center cell (1,1) is NEVER changed — it's always the fixed face color.
+// Center cell (1,1): cube state is NEVER changed (always fixed), but we DO
+// update the visual background so it feels live like the other squares.
 function updateEditorColors(sampled) {
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
-      if (r===1 && c===1) continue;   // center is fixed — never touch it
       const col = sampled[r][c];
       if (!col) continue;
-      cube[currentFace][r][c] = col;
       const el = document.getElementById(`gc_${r}_${c}`);
-      if (el) el.style.background = COLOR_HEX[col];
+      if (r===1 && c===1) {
+        // Center: show live camera color visually, cube state stays fixed
+        const rgb = lastSampledRGB[currentFace][r][c];
+        if (el && rgb && (rgb.r || rgb.g || rgb.b)) {
+          el.style.background = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+        }
+      } else {
+        // Non-center: update both cube state and visual
+        cube[currentFace][r][c] = col;
+        if (el) el.style.background = COLOR_HEX[col];
+      }
     }
   }
 }
@@ -723,6 +788,9 @@ function pickFace(f) {
 }
 
 function saveFace() {
+  // Learn the RGB values for colors on this face before locking
+  learnFaceColors(currentFace);
+
   locked[currentFace] = true;
   document.querySelectorAll('.ftab').forEach(t => {
     if (t.dataset.f===currentFace) { t.classList.remove('active'); t.classList.add('done'); }
@@ -736,7 +804,9 @@ function saveFace() {
 
   const doneCount = FACES.filter(f=>locked[f]).length;
   const allDone = doneCount === 6;
-  setMsg(allDone ? '✓ All 6 faces locked! Tap Solve →' : `${doneCount}/6 faces locked`, allDone?'ok':'info');
+  const learnedCount = Object.keys(learnedColors).length;
+  const learnedNote = learnedCount > 0 ? ` · ${learnedCount} colors learned` : '';
+  setMsg(allDone ? '✓ All 6 faces locked! Tap Solve →' : `${doneCount}/6 faces locked${learnedNote}`, allDone?'ok':'info');
   document.getElementById('solveBtn').disabled = !allDone;
 
   // Show rotation arrow
@@ -894,6 +964,11 @@ function render3D(s){
 
 function goBack(){
   initCube(); locked={}; FACES.forEach(f=>locked[f]=false);
+  // Clear learned palette so it relearns from scratch for new cube
+  Object.keys(learnedColors).forEach(k => delete learnedColors[k]);
+  FACES.forEach(f => {
+    lastSampledRGB[f] = Array.from({length:3}, () => Array(3).fill(null));
+  });
   arrowActive=false;
   document.querySelectorAll('.ftab').forEach(t=>{t.classList.remove('done','active');if(t.dataset.f==='U')t.classList.add('active');});
   document.getElementById('solveBtn').disabled=true;
