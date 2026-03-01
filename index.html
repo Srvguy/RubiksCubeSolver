@@ -619,7 +619,33 @@ body {
 .arrow-big { font-size: 1.8rem; color: var(--warn); }
 .move-face-label { font-size: 0.6rem; color: var(--muted); text-align: center; margin-top: 4px; font-family: 'Space Mono', monospace; letter-spacing: 1px; }
 
-/* Dark scrollbar */
+/* ── Live badge ── */
+.live-badge {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.58rem;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: rgba(72,207,173,0.15);
+  border: 1px solid rgba(72,207,173,0.4);
+  color: var(--accent2);
+  letter-spacing: 1px;
+  vertical-align: middle;
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+.live-badge.locked {
+  background: rgba(108,99,255,0.12);
+  border-color: rgba(108,99,255,0.3);
+  color: var(--accent);
+  animation: none;
+  opacity: 0.7;
+}
+@keyframes livePulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ── Dark scrollbar ── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 2px; }
@@ -705,14 +731,16 @@ body {
           <div class="scan-instruction">Hold cube face flat, fill the grid</div>
         </div>
 
-        <div style="margin-top:12px" class="btn-row">
-          <button class="btn btn-secondary btn-sm" onclick="captureColors()">⚡ Scan Colors</button>
+        <div style="margin-top:12px">
           <button class="btn btn-secondary btn-sm" onclick="saveFace()">✓ Lock Face</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Manual Color Editor — <span id="editLabel">TOP Face</span></div>
+        <div class="card-title">
+          Manual Color Editor — <span id="editLabel">TOP Face</span>
+          <span class="live-badge" id="liveBadge">● LIVE</span>
+        </div>
 
         <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
           <div class="grid-editor" id="gridEditor"></div>
@@ -806,11 +834,6 @@ const FACE_LABELS = {U:'TOP',D:'BOTTOM',F:'FRONT',B:'BACK',L:'LEFT',R:'RIGHT'};
 // Default center colors (fixed per face in a standard cube)
 const CENTER_COLOR = {U:'W', D:'Y', F:'R', B:'O', L:'G', R:'B'};
 const COLOR_CSS = {W:'var(--W)',Y:'var(--Y)',R:'var(--R)',O:'var(--O)',B:'var(--B)',G:'var(--G)'};
-// Reference RGB for each color (used in pixel-color detection)
-const REF_RGB = {
-  W:[245,245,240], Y:[255,209,102], R:[239,71,111],
-  O:[247,127,0],   B:[76,201,240],  G:[72,207,173]
-};
 
 let cube = {}, locked = {}, currentFace = 'U', selCell = null, selColor = 'W';
 let solution = [], solveIdx = 0, solveState = {};
@@ -846,15 +869,32 @@ function startOverlay() {
   const vid = document.getElementById('video');
   oc.width = vid.videoWidth || vid.clientWidth;
   oc.height = vid.videoHeight || vid.clientHeight;
+  // Tap on camera dismisses the rotation arrow
+  oc.onclick = () => { rotationArrowActive = false; };
   drawOverlay();
 }
+
+// Which rotation arrow to show after locking each face (to get to next face)
+// Arrow directions: 'up','down','left','right','flip-v','flip-h'
+const NEXT_ROTATION = {
+  U: { dir: 'down',   label: 'Tilt toward you' },   // U→F: tilt cube forward
+  F: { dir: 'left',   label: 'Rotate left'      },   // F→R
+  R: { dir: 'left',   label: 'Rotate left'      },   // R→B
+  B: { dir: 'left',   label: 'Rotate left'      },   // B→L
+  L: { dir: 'flip-v', label: 'Flip upside-down' },   // L→D
+  D: null,                                             // D is last
+};
+
+let rotationArrowActive = false;   // show big arrow overlay
+let rotationArrowDir   = null;
+let rotationArrowLabel = '';
+let arrowAnim = 0;                 // for pulsing
 
 function drawOverlay() {
   const oc = document.getElementById('overlay');
   const vid = document.getElementById('video');
   if (!oc || !vid.videoWidth) { animFrame = requestAnimationFrame(drawOverlay); return; }
 
-  // Sync canvas size to display size
   oc.width  = vid.clientWidth;
   oc.height = vid.clientHeight;
   oc.style.position = 'absolute';
@@ -864,55 +904,168 @@ function drawOverlay() {
 
   const ctx = oc.getContext('2d');
   const W = oc.width, H = oc.height;
-  const gridSize = Math.min(W, H) * 0.65;
-  const ox = (W - gridSize) / 2, oy = (H - gridSize) / 2;
+
+  // Grid occupies center 70% of the shorter dimension
+  const gridSize = Math.min(W, H) * 0.70;
+  const ox = (W - gridSize) / 2;
+  const oy = (H - gridSize) / 2;
   const cell = gridSize / 3;
 
   ctx.clearRect(0, 0, W, H);
 
-  // Sample 9 pixels from camera and show color dots
+  // ── Dim edges outside the grid ──
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0, 0, W, oy);                        // top
+  ctx.fillRect(0, oy + gridSize, W, H - oy - gridSize); // bottom
+  ctx.fillRect(0, oy, ox, gridSize);                 // left
+  ctx.fillRect(ox + gridSize, oy, W - ox - gridSize, gridSize); // right
+
+  // ── 3×3 grid lines ──
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 1.5;
+  // Inner grid lines
+  for (let i = 1; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(ox + i * cell, oy);
+    ctx.lineTo(ox + i * cell, oy + gridSize);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ox, oy + i * cell);
+    ctx.lineTo(ox + gridSize, oy + i * cell);
+    ctx.stroke();
+  }
+  // Outer border — thicker, colored
+  ctx.strokeStyle = locked[currentFace] ? 'rgba(72,207,173,0.9)' : 'rgba(108,99,255,0.9)';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(ox, oy, gridSize, gridSize);
+
+  // ── Corner markers for easier alignment ──
+  const cornerLen = cell * 0.25;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  const corners = [[ox, oy],[ox+gridSize, oy],[ox, oy+gridSize],[ox+gridSize, oy+gridSize]];
+  const dirs = [[1,1],[-1,1],[1,-1],[-1,-1]];
+  corners.forEach(([cx,cy],[dx,dy]) => {
+    ctx.beginPath(); ctx.moveTo(cx + dx*cornerLen, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + dy*cornerLen); ctx.stroke();
+  });
+
+  // ── Sample pixels, draw color dots, AND feed editor live ──
   const temp = document.getElementById('canvas');
   temp.width = vid.videoWidth;
   temp.height = vid.videoHeight;
   const tc = temp.getContext('2d');
   tc.drawImage(vid, 0, 0);
+  const sx = vid.videoWidth / W, sy = vid.videoHeight / H;
 
-  // Scale factor from display to video
-  const sx = vid.videoWidth / W;
-  const sy = vid.videoHeight / H;
+  const sampledColors = [[],[],[]];
 
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
       const cx = ox + c * cell + cell / 2;
       const cy = oy + r * cell + cell / 2;
-
-      // Draw cell box
-      ctx.strokeStyle = 'rgba(108,99,255,0.8)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(ox + c * cell + 3, oy + r * cell + 3, cell - 6, cell - 6);
-
-      // Sample pixel
       const px = Math.floor(cx * sx), py = Math.floor(cy * sy);
       const px4 = tc.getImageData(px, py, 1, 1).data;
-      const detected = nearestColor(px4[0], px4[1], px4[2]);
+      const detectedColor = (r === 1 && c === 1)
+        ? CENTER_COLOR[currentFace]
+        : nearestColor(px4[0], px4[1], px4[2]);
 
-      // Draw color dot
+      sampledColors[r][c] = detectedColor;
+
+      // Color dot on camera
+      const dotR = cell * 0.18;
       ctx.beginPath();
-      ctx.arc(cx, cy, cell * 0.22, 0, Math.PI * 2);
+      ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
       ctx.fillStyle = `rgb(${px4[0]},${px4[1]},${px4[2]})`;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
   }
 
-  // Outer border
-  ctx.strokeStyle = 'rgba(108,99,255,0.6)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(ox, oy, gridSize, gridSize);
+  // Push detected colors into the editor grid in real time
+  updateEditorLive(sampledColors);
+
+  // ── Rotation arrow overlay (shown after locking a face) ──
+  if (rotationArrowActive && rotationArrowDir) {
+    arrowAnim += 0.06;
+    const pulse = 0.65 + 0.35 * Math.abs(Math.sin(arrowAnim));
+    const bounce = 12 * Math.sin(arrowAnim * 1.2);
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Banner background
+    const bannerH = 80;
+    const bannerY = H / 2 - bannerH / 2;
+    ctx.fillStyle = 'rgba(15,17,23,0.92)';
+    roundRect(ctx, 20, bannerY - 50, W - 40, bannerH + 100, 18);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,209,102,0.6)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 20, bannerY - 50, W - 40, bannerH + 100, 18);
+    ctx.stroke();
+
+    // "FACE LOCKED ✓" text
+    ctx.fillStyle = 'rgba(72,207,173,1)';
+    ctx.font = `bold ${Math.round(W * 0.042)}px "Space Mono", monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('✓ FACE LOCKED', W / 2, bannerY - 12);
+
+    // Arrow
+    ctx.fillStyle = `rgba(255,209,102,${pulse})`;
+    ctx.font = `${Math.round(W * 0.22)}px serif`;
+    ctx.textAlign = 'center';
+
+    const arrowChars = {
+      'right':  '→', 'left':   '←',
+      'up':     '↑', 'down':   '↓',
+      'flip-v': '↕', 'flip-h': '↔',
+    };
+    const arrow = arrowChars[rotationArrowDir] || '↻';
+
+    ctx.save();
+    const arrowX = W / 2;
+    const arrowY = bannerY + 60;
+    if (rotationArrowDir === 'left' || rotationArrowDir === 'right') {
+      ctx.translate(arrowX + bounce, arrowY);
+    } else if (rotationArrowDir === 'up' || rotationArrowDir === 'flip-v') {
+      ctx.translate(arrowX, arrowY - bounce);
+    } else {
+      ctx.translate(arrowX, arrowY + bounce);
+    }
+    ctx.fillText(arrow, 0, 0);
+    ctx.restore();
+
+    // Label text
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = `700 ${Math.round(W * 0.042)}px Nunito, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(rotationArrowLabel, W / 2, bannerY + 108);
+
+    // "Tap to dismiss" hint
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = `${Math.round(W * 0.032)}px Nunito, sans-serif`;
+    ctx.fillText('Tap camera to dismiss', W / 2, bannerY + 132);
+  }
 
   animFrame = requestAnimationFrame(drawOverlay);
+}
+
+// Helper: rounded rectangle path
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
 }
 
 function captureColors() {
@@ -946,13 +1099,45 @@ function captureColors() {
   setMsg('Colors captured! Check the grid and correct any mistakes, then tap Lock Face.','info');
 }
 
-function nearestColor(r, g, b) {
-  let best = 'W', bestDist = Infinity;
-  for (const [col, ref] of Object.entries(REF_RGB)) {
-    const d = (r-ref[0])**2 + (g-ref[1])**2 + (b-ref[2])**2;
-    if (d < bestDist) { bestDist = d; best = col; }
+// ── HSV-based color classifier ──
+// Much better than RGB distance for separating Red / Orange / Yellow
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max - min;
+  let h = 0, s = max === 0 ? 0 : d / max, v = max;
+  if (d !== 0) {
+    if      (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else                h = ((r - g) / d + 4) / 6;
   }
-  return best;
+  return { h: h * 360, s, v }; // h: 0-360, s: 0-1, v: 0-1
+}
+
+function nearestColor(r, g, b) {
+  const { h, s, v } = rgbToHsv(r, g, b);
+
+  // White: very low saturation, high brightness
+  if (s < 0.20 && v > 0.75) return 'W';
+
+  // Very dark → likely shadow on white, still call white
+  if (v < 0.18) return 'W';
+
+  // Now use hue to distinguish chromatic colors
+  // Red wraps around 0°/360°
+  if ((h >= 345 || h < 15) && s > 0.35) return 'R';
+  // Orange: 15–40°
+  if (h >= 15 && h < 40  && s > 0.40) return 'O';
+  // Yellow: 40–75°
+  if (h >= 40 && h < 75  && s > 0.35) return 'Y';
+  // Green: 75–165°
+  if (h >= 75 && h < 165 && s > 0.25) return 'G';
+  // Blue: 165–265°
+  if (h >= 165 && h < 265 && s > 0.25) return 'B';
+  // Magenta/red again: 265–345°  (some reds photograph pinkish)
+  if (h >= 265 && h < 345 && s > 0.30) return 'R';
+
+  // Fallback: low saturation = white
+  return 'W';
 }
 
 // ═══════════════════════════════════════════════
@@ -1075,9 +1260,19 @@ function pickFace(f) {
   });
   document.getElementById('editLabel').textContent = FACE_LABELS[f] + ' Face';
   document.getElementById('scanLabel').textContent = '📷 ' + FACE_LABELS[f] + ' FACE';
+
+  // Restore badge state based on whether face is locked
+  const badge = document.getElementById('liveBadge');
+  if (badge) {
+    if (locked[f]) {
+      badge.textContent = '✓ LOCKED'; badge.className = 'live-badge locked';
+    } else {
+      badge.textContent = '● LIVE'; badge.className = 'live-badge';
+    }
+  }
+
   renderEditor();
   updateOrientGuide(f);
-  // Scroll orientation guide into view
   document.getElementById('orientGuide').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -1090,6 +1285,7 @@ function renderEditor() {
       d.className = 'gc' + (r===1&&c===1?' center-cell':'');
       d.dataset.c = cube[currentFace][r][c];
       d.dataset.r = r; d.dataset.cc = c;
+      d.id = `gc_${r}_${c}`;
       if (!(r===1&&c===1)) {
         d.onclick = () => {
           if (selCell) selCell.classList.remove('selected');
@@ -1098,6 +1294,24 @@ function renderEditor() {
         };
       }
       ed.appendChild(d);
+    }
+  }
+}
+
+// Called every frame from drawOverlay — updates editor cells live from sampled colors
+// without rebuilding the DOM. Skips locked faces and the center cell.
+function updateEditorLive(sampledColors) {
+  if (locked[currentFace]) return;
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      if (r === 1 && c === 1) continue;
+      const col = sampledColors[r][c];
+      // Only update if color changed — avoids thrashing
+      if (cube[currentFace][r][c] !== col) {
+        cube[currentFace][r][c] = col;
+        const cell = document.getElementById(`gc_${r}_${c}`);
+        if (cell) cell.dataset.c = col;
+      }
     }
   }
 }
@@ -1132,11 +1346,25 @@ function saveFace() {
   document.querySelectorAll('.face-tab').forEach(t => {
     if (t.dataset.f === currentFace) { t.classList.remove('active'); t.classList.add('done'); }
   });
+
+  // Flip badge to locked
+  const badge = document.getElementById('liveBadge');
+  if (badge) { badge.textContent = '✓ LOCKED'; badge.className = 'live-badge locked'; }
+
   const doneCount = FACES.filter(f => locked[f]).length;
   const allDone = doneCount === 6;
   setMsg(allDone ? '✓ All 6 faces locked! Tap Solve →' : `${doneCount}/6 faces locked`, allDone ? 'ok' : 'info');
   document.getElementById('solveBtn').disabled = !allDone;
-  const next = FACES.find(f => !locked[f]);
+
+  // Show rotation arrow if there's a next face
+  const rot = NEXT_ROTATION[currentFace];
+  if (rot && !allDone) {
+    rotationArrowActive = true;
+    rotationArrowDir    = rot.dir;
+    rotationArrowLabel  = rot.label;
+  }
+
+  const next = SCAN_ORDER[SCAN_ORDER.indexOf(currentFace) + 1];
   if (next) pickFace(next);
 }
 
@@ -1481,6 +1709,9 @@ function goBack() {
   initCube();
   locked = {};
   FACES.forEach(f => locked[f] = false);
+  rotationArrowActive = false;
+  const badge = document.getElementById('liveBadge');
+  if (badge) { badge.textContent = '● LIVE'; badge.className = 'live-badge'; }
   document.querySelectorAll('.face-tab').forEach(t => { t.classList.remove('done','active'); if (t.dataset.f==='U') t.classList.add('active'); });
   document.getElementById('solveBtn').disabled = true;
   setMsg('Scan or manually set all 6 faces, then tap Solve →','info');
