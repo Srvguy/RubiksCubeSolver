@@ -349,54 +349,50 @@ function rgbToHsv(r,g,b) {
 function classifyColor(r,g,b) {
   const {h,s,v} = rgbToHsv(r,g,b);
 
-  // ── Step 1: Brightness/saturation gates ──
-  // Very dark → shadowed tile, call white
+  // Very dark → treat as shadow, return white
   if (v < 0.18) return 'W';
 
-  // ── Step 2: Yellow vs White tie-breaker ──
-  // This is the hardest pair. Under a torch, yellow tiles go very bright
-  // and can drop below the saturation threshold for yellow.
-  // Key insight: yellow always has R >> B (warm bias).
-  // True white has R ≈ G ≈ B (balanced channels).
-  // We check this ratio BEFORE the generic white test so yellow isn't swallowed.
-  const rb = b > 0 ? r / b : 99;   // red-to-blue ratio
-  const rg = g > 0 ? r / g : 99;
-  if (rb > 1.25 && rg > 0.85 && v > 0.55) {
-    // Noticeably warmer than white — classify by hue
-    if (h >= 10 && h < 42) {
-      // Orange vs yellow — saturation decides
-      if (s > 0.60) return 'O';
-      if (s > 0.18) return 'Y';   // washed-out gold still counts as yellow
-    }
-    if (h >= 42 && h < 72) return 'Y';
+  // ── Yellow vs White: use R/B channel ratio ──
+  // Under a torch, yellow can wash out to very low saturation.
+  // But yellow ALWAYS has more red than blue (warm bias).
+  // White has balanced R≈G≈B. Threshold 1.10 catches even washed-out yellow.
+  const rb = b > 0 ? r / b : 99;
+  if (rb > 1.10 && v > 0.50) {
+    // Warm pixel — route through hue for chromatic colors
+    // Red: wraps 0°, extend to 18° to catch warm-shifted reds
+    if ((h >= 340 || h < 18) && s > 0.35) return 'R';
+    // Orange: clearly in orange hue territory, highly saturated
+    if (h >= 18 && h < 38 && s > 0.55) return 'O';
+    // 38-42°: only call orange if extremely saturated (true orange sticker)
+    if (h >= 38 && h < 42 && s > 0.85) return 'O';
+    // 42°+ in warm zone = yellow/gold regardless of saturation
+    if (h >= 42 && h < 75 && s > 0.12) return 'Y';
+    // catch remaining warm hues
+    if (h >= 18 && h < 75) return 'Y';
   }
 
-  // ── Step 3: True white — balanced channels, bright ──
-  if (s < 0.18 && v > 0.68) return 'W';
+  // ── True white: balanced channels, bright ──
+  if (s < 0.18 && v > 0.65) return 'W';
 
-  // ── Step 4: Normal hue-based classification ──
-  // Red wraps at 0°/360°
-  if ((h >= 345 || h < 10) && s > 0.40) return 'R';
+  // ── Standard hue classification ──
+  // Red — wide range to catch warm-shifted reds under torch
+  if ((h >= 340 || h < 18) && s > 0.35) return 'R';
 
-  // Orange: 10–32°, highly saturated
-  if (h >= 10 && h < 32 && s > 0.55) return 'O';
+  // Orange
+  if (h >= 18 && h < 38 && s > 0.50) return 'O';
 
-  // Tie-breaker 32–42°: orange is very saturated, gold/yellow less so
-  if (h >= 32 && h < 42) return (s > 0.72) ? 'O' : 'Y';
+  // Yellow/Gold
+  if (h >= 38 && h < 75 && s > 0.28) return 'Y';
 
-  // Yellow/Gold: 42–72°
-  if (h >= 42 && h < 72 && s > 0.30) return 'Y';
+  // Green
+  if (h >= 75 && h < 165 && s > 0.22) return 'G';
 
-  // Green: 72–165°
-  if (h >= 72 && h < 165 && s > 0.25) return 'G';
+  // Blue
+  if (h >= 165 && h < 270 && s > 0.22) return 'B';
 
-  // Blue: 165–270°
-  if (h >= 165 && h < 270 && s > 0.25) return 'B';
+  // Magenta/pink red
+  if (h >= 270 && h < 340 && s > 0.28) return 'R';
 
-  // Pinkish/magenta red: 270–345°
-  if (h >= 270 && h < 345 && s > 0.30) return 'R';
-
-  // Fallback
   return 'W';
 }
 
@@ -533,23 +529,9 @@ function runLoop() {
         let rawR = 0, rawG = 0, rawB = 0;
 
         if (r===1 && c===1) {
-          // Center cell — sample it too, but always use the fixed center color
+          // Center cell — color is ALWAYS fixed, no classification
           detectedColor = CENTER_COLOR[currentFace];
-          // Still sample for the visual dot color
-          const sampleW = Math.floor(cell * 0.5 * sx);
-          const sampleH = Math.floor(cell * 0.5 * sy);
-          const px0 = Math.max(0, Math.round(cx*sx - sampleW/2));
-          const py0 = Math.max(0, Math.round(cy*sy - sampleH/2));
-          const sw  = Math.min(sampleW, tmp.width  - px0);
-          const sh  = Math.min(sampleH, tmp.height - py0);
-          if (sw > 0 && sh > 0) {
-            const imgData = tc.getImageData(px0, py0, sw, sh).data;
-            let n = 0;
-            for (let i = 0; i < imgData.length; i += 4) {
-              rawR += imgData[i]; rawG += imgData[i+1]; rawB += imgData[i+2]; n++;
-            }
-            rawR = Math.round(rawR/n); rawG = Math.round(rawG/n); rawB = Math.round(rawB/n);
-          }
+          // rawR/G/B stay 0 — we don't need the raw color for display
         } else {
           // Sample the inner 60% of each cell area (avoids grid-line edges)
           const sampleW = Math.floor(cell * 0.60 * sx);
@@ -684,21 +666,17 @@ function renderEditor() {
   }
 }
 
-// Update editor cell backgrounds from sampled array — no DOM rebuild
-// Includes center cell (always shows its fixed color, but background still needs painting)
+// Update editor cell backgrounds from sampled array — no DOM rebuild.
+// Center cell (1,1) is NEVER changed — it's always the fixed face color.
 function updateEditorColors(sampled) {
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
+      if (r===1 && c===1) continue;   // center is fixed — never touch it
       const col = sampled[r][c];
       if (!col) continue;
-      // Update cube state for non-center cells
-      if (!(r===1 && c===1)) cube[currentFace][r][c] = col;
-      // Always update the background — center cell shows live camera color even though it's fixed
+      cube[currentFace][r][c] = col;
       const el = document.getElementById(`gc_${r}_${c}`);
-      if (el) {
-        const hex = COLOR_HEX[col];
-        if (el.style.background !== hex) el.style.background = hex;
-      }
+      if (el) el.style.background = COLOR_HEX[col];
     }
   }
 }
