@@ -23,7 +23,7 @@
   --danger: #ef476f;
   --cW: #f5f5f0; --cY: #ffd166; --cR: #ef476f;
   --cO: #f77f00; --cB: #4cc9f0; --cG: #48cfad;
-  --cube-cell: 52px;
+  --cube-cell: 40px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Nunito', sans-serif; }
@@ -229,19 +229,19 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
         </div>
       </div>
 
+      <!-- Lock button — between camera and editor -->
+      <button class="btn btn-secondary" id="lockBtn" onclick="saveFace()" style="padding:10px 18px;font-size:0.85rem;">✓ Lock This Face</button>
+
       <!-- Live editor -->
-      <div class="card">
-        <div class="card-ttl">
+      <div class="card" style="padding:12px 14px 14px">
+        <div class="card-ttl" style="margin-bottom:8px">
           <span id="editLabel">TOP Face</span>
           <span class="live-badge" id="liveBadge">● LIVE</span>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
           <div class="grid-editor" id="gridEditor"></div>
-          <p style="font-size:0.7rem;color:var(--muted);text-align:center">Tap a square then pick a color to correct it</p>
+          <p style="font-size:0.68rem;color:var(--muted);text-align:center">Tap a square then pick a color to correct it</p>
           <div class="palette" id="palette"></div>
-        </div>
-        <div style="margin-top:14px">
-          <button class="btn btn-secondary btn-sm" onclick="saveFace()">✓ Lock This Face</button>
         </div>
       </div>
 
@@ -306,7 +306,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 const FACES = ['U','D','F','B','L','R'];
 const FACE_LABELS = {U:'TOP', D:'BOTTOM', F:'FRONT', B:'BACK', L:'LEFT', R:'RIGHT'};
 const CENTER_COLOR = {U:'W', D:'Y', F:'R', B:'O', L:'G', R:'B'};
-const COLOR_HEX = {W:'#f5f5f0', Y:'#ffd166', R:'#ef476f', O:'#f77f00', B:'#4cc9f0', G:'#48cfad'};
+const COLOR_HEX = {W:'#f5f5f0', Y:'#ffd166', R:'#ef476f', O:'#f77f00', B:'#1a6edb', G:'#48cfad'};
 const SCAN_ORDER = ['U','F','R','B','L','D'];
 
 // After locking a face, which direction to rotate to reach the next face
@@ -348,14 +348,39 @@ function rgbToHsv(r,g,b) {
 
 function classifyColor(r,g,b) {
   const {h,s,v} = rgbToHsv(r,g,b);
-  if (s < 0.18 && v > 0.70) return 'W';   // white: low sat, bright
-  if (v < 0.20) return 'W';               // very dark = shadowed white
-  if ((h>=345||h<12) && s>0.35) return 'R';
-  if (h>=12  && h<38  && s>0.45) return 'O';
-  if (h>=38  && h<75  && s>0.40) return 'Y';
-  if (h>=75  && h<165 && s>0.28) return 'G';
-  if (h>=165 && h<265 && s>0.28) return 'B';
-  if (h>=265 && h<345 && s>0.30) return 'R'; // pinkish red
+
+  // White: very low saturation + bright
+  if (s < 0.15 && v > 0.72) return 'W';
+  // Dark shadow — treat as white (shadowed white tile)
+  if (v < 0.18) return 'W';
+
+  // ── Hue-based classification ──
+  // Red wraps at 0°/360°
+  if ((h >= 345 || h < 10) && s > 0.40) return 'R';
+
+  // Orange: 10–32°. Must be highly saturated.
+  // Gold/yellow starts ~38°+ and has slightly lower sat under warm light.
+  if (h >= 10 && h < 32 && s > 0.55) return 'O';
+
+  // Tie-breaker zone 32–42°: could be orange OR gold depending on saturation
+  // Orange stickers are very saturated (s > 0.75), gold/yellow less so
+  if (h >= 32 && h < 42) {
+    return (s > 0.72) ? 'O' : 'Y';
+  }
+
+  // Yellow / Gold: 42–72°
+  if (h >= 42 && h < 72 && s > 0.35) return 'Y';
+
+  // Green: 72–165°
+  if (h >= 72 && h < 165 && s > 0.25) return 'G';
+
+  // Blue: 165–270° — now maps to deep royal blue in display
+  if (h >= 165 && h < 270 && s > 0.25) return 'B';
+
+  // Pinkish/magenta red: 270–345°
+  if (h >= 270 && h < 345 && s > 0.30) return 'R';
+
+  // Low-sat fallback = white
   return 'W';
 }
 
@@ -617,12 +642,12 @@ function renderEditor() {
       d.id = `gc_${r}_${c}`;
       d.className = 'gc' + (r===1&&c===1 ? ' center-cell' : '');
       d.dataset.r = r; d.dataset.c = c;
+      // Always set background inline — CSS attribute selectors don't update dynamically
       d.style.background = COLOR_HEX[cube[currentFace][r][c]] || '#2a2a3a';
       if (!(r===1 && c===1)) {
         d.onclick = () => {
           if (selCell) selCell.classList.remove('sel');
           selCell = d; d.classList.add('sel');
-          // apply current color immediately
           const row = +d.dataset.r, col = +d.dataset.c;
           cube[currentFace][row][col] = selColor;
           d.style.background = COLOR_HEX[selColor];
@@ -634,16 +659,17 @@ function renderEditor() {
 }
 
 // Update editor cell backgrounds from sampled array — no DOM rebuild
+// Includes center cell (always shows its fixed color, but background still needs painting)
 function updateEditorColors(sampled) {
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
       const col = sampled[r][c];
       if (!col) continue;
-      if (cube[currentFace][r][c] !== col) {
-        cube[currentFace][r][c] = col;
-      }
+      // Update cube state for non-center cells
+      if (!(r===1 && c===1)) cube[currentFace][r][c] = col;
+      // Always update the background — center cell shows live camera color even though it's fixed
       const el = document.getElementById(`gc_${r}_${c}`);
-      if (el && !(r===1&&c===1)) {
+      if (el) {
         const hex = COLOR_HEX[col];
         if (el.style.background !== hex) el.style.background = hex;
       }
@@ -682,6 +708,12 @@ function pickFace(f) {
   if (locked[f]) { badge.textContent = '✓ LOCKED'; badge.className = 'live-badge locked'; }
   else           { badge.textContent = '● LIVE';   badge.className = 'live-badge'; }
 
+  const lockBtn = document.getElementById('lockBtn');
+  if (lockBtn) {
+    lockBtn.textContent = '✓ Lock This Face';
+    lockBtn.disabled = locked[f];
+  }
+
   renderEditor();
   // NO scrollIntoView — don't jump the page
 }
@@ -694,6 +726,9 @@ function saveFace() {
 
   const badge = document.getElementById('liveBadge');
   badge.textContent = '✓ LOCKED'; badge.className = 'live-badge locked';
+
+  const lockBtn = document.getElementById('lockBtn');
+  if (lockBtn) { lockBtn.textContent = '✓ Locked'; lockBtn.disabled = true; }
 
   const doneCount = FACES.filter(f=>locked[f]).length;
   const allDone = doneCount === 6;
@@ -860,6 +895,8 @@ function goBack(){
   document.getElementById('solveBtn').disabled=true;
   const badge=document.getElementById('liveBadge');
   badge.textContent='● LIVE'; badge.className='live-badge';
+  const lockBtn=document.getElementById('lockBtn');
+  if(lockBtn){lockBtn.textContent='✓ Lock This Face';lockBtn.disabled=false;}
   setMsg('Point camera at each face — colors update live. Tap Lock This Face when it looks right.','info');
   pickFace('U');
   render3D(cube);
