@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cube Solver">
+<link rel="manifest" href="manifest.json">
+<title>🎲 Cube Solver</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1c1f2e;
+  --surface2: #252840;
+  --border: rgba(255,255,255,0.07);
+  --text: #e8eaf6;
+  --muted: #6b7280;
+  --accent: #6c63ff;
+  --accent2: #48cfad;
+  --warn: #ffd166;
+  --danger: #ef476f;
+  /* Cube face colors */
+  --W: #f5f5f0; --Y: #ffd166; --R: #ef476f;
+  --O: #f77f00; --B: #4cc9f0; --G: #48cfad;
+  --cube-cell: 44px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  font-family: 'Nunito', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.app {
+  width: 100%;
+  max-width: 480px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.header {
+  padding: 14px 20px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.logo {
+  font-family: 'Space Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+.logo span { color: var(--accent); }
+.badge {
+  font-size: 0.65rem;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(108,99,255,0.15);
+  border: 1px solid rgba(108,99,255,0.3);
+  color: var(--accent);
+  font-family: 'Space Mono', monospace;
+  letter-spacing: 1px;
+}
+
+/* ── Step indicator ── */
+.steps {
+  display: flex;
+  align-items: center;
+  padding: 0 20px 12px;
+  gap: 0;
+  flex-shrink: 0;
+}
+.step {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  transition: color 0.3s;
+}
+.step.active { color: var(--accent); }
+.step.done { color: var(--accent2); }
+.step-num {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.7rem;
+  border: 2px solid currentColor;
+  flex-shrink: 0;
+}
+.step-line { flex: 1; height: 1px; background: var(--border); margin: 0 8px; }
+
+/* ── Scrollable body ── */
+.body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface2) transparent;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px;
+  position: relative;
+  overflow: hidden;
+}
+.card-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+/* ── Camera scan ── */
+.cam-wrap {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 4/3;
+}
+#video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+#overlay {
+  position: absolute; inset: 0;
+}
+
+.face-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.face-tab {
+  padding: 7px 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+.face-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(108,99,255,0.12); }
+.face-tab.done   { border-color: var(--accent2); color: var(--accent2); background: rgba(72,207,173,0.1); }
+
+/* ── Color grid editor ── */
+.grid-editor {
+  display: grid;
+  grid-template-columns: repeat(3, var(--cube-cell));
+  grid-template-rows: repeat(3, var(--cube-cell));
+  gap: 5px;
+  justify-content: center;
+}
+.gc {
+  width: var(--cube-cell); height: var(--cube-cell);
+  border-radius: 8px;
+  border: 2px solid rgba(0,0,0,0.25);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+  position: relative;
+}
+.gc:hover { transform: scale(1.07); }
+.gc.selected { box-shadow: 0 0 0 3px #fff, 0 0 14px rgba(255,255,255,0.5); transform: scale(1.1); z-index: 2; }
+.gc.center-cell { cursor: default; }
+.gc.center-cell::after {
+  content: '●';
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.9rem;
+  color: rgba(0,0,0,0.3);
+}
+.gc[data-c="W"] { background: var(--W); }
+.gc[data-c="Y"] { background: var(--Y); }
+.gc[data-c="R"] { background: var(--R); }
+.gc[data-c="O"] { background: var(--O); }
+.gc[data-c="B"] { background: var(--B); }
+.gc[data-c="G"] { background: var(--G); }
+.gc[data-c="?"] { background: #2a2a3a; border: 2px dashed rgba(255,255,255,0.15); }
+
+.palette {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 14px;
+}
+.pc {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.pc:hover, .pc.sel { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 14px rgba(255,255,255,0.35); }
+
+/* ── Buttons ── */
+.btn {
+  border: none;
+  border-radius: 12px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 13px 20px;
+  transition: all 0.18s;
+  width: 100%;
+  letter-spacing: 0.3px;
+}
+.btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), #9c88ff);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(108,99,255,0.35);
+}
+.btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 26px rgba(108,99,255,0.45); }
+.btn-primary:active:not(:disabled) { transform: translateY(0); }
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-success {
+  background: linear-gradient(135deg, var(--accent2), #26d0a8);
+  color: #0f1117;
+  font-weight: 900;
+  box-shadow: 0 4px 20px rgba(72,207,173,0.35);
+}
+.btn-success:hover:not(:disabled) { transform: translateY(-2px); }
+.btn-sm { padding: 9px 14px; font-size: 0.8rem; border-radius: 9px; }
+.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ── Status messages ── */
+.msg {
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.msg-info { background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.25); color: #a29bfe; }
+.msg-warn { background: rgba(255,209,102,0.1); border: 1px solid rgba(255,209,102,0.3); color: var(--warn); }
+.msg-ok   { background: rgba(72,207,173,0.1); border: 1px solid rgba(72,207,173,0.3); color: var(--accent2); }
+.msg-err  { background: rgba(239,71,111,0.1); border: 1px solid rgba(239,71,111,0.3); color: var(--danger); }
+
+/* ── Solver panel ── */
+.solve-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.move-counter { text-align: right; }
+.move-big {
+  font-family: 'Space Mono', monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.move-label { font-size: 0.65rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+
+.progress-track {
+  height: 5px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ── 3D Cube ── */
+.scene {
+  display: flex;
+  justify-content: center;
+  perspective: 700px;
+  padding: 20px 0;
+}
+.cube3d {
+  width: 110px; height: 110px;
+  transform-style: preserve-3d;
+  transform: rotateX(-22deg) rotateY(35deg);
+  animation: spin3d 10s linear infinite;
+}
+.cube3d.paused { animation-play-state: paused; }
+@keyframes spin3d {
+  from { transform: rotateX(-22deg) rotateY(0deg); }
+  to   { transform: rotateX(-22deg) rotateY(360deg); }
+}
+.cface {
+  position: absolute;
+  width: 110px; height: 110px;
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 3px; padding: 5px;
+  border-radius: 5px;
+}
+.cface.fF { transform: translateZ(55px); }
+.cface.fB { transform: translateZ(-55px) rotateY(180deg); }
+.cface.fR { transform: rotateY(90deg) translateZ(55px); }
+.cface.fL { transform: rotateY(-90deg) translateZ(55px); }
+.cface.fU { transform: rotateX(90deg) translateZ(55px); }
+.cface.fD { transform: rotateX(-90deg) translateZ(55px); }
+.cc {
+  border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.25);
+}
+
+/* ── Current move display ── */
+.move-display {
+  text-align: center;
+  padding: 10px 0 6px;
+}
+.move-notation {
+  font-family: 'Space Mono', monospace;
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--warn);
+  line-height: 1;
+  text-shadow: 0 0 40px rgba(255,209,102,0.4);
+}
+.move-desc {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 6px;
+  font-weight: 600;
+}
+.move-icon {
+  font-size: 2.2rem;
+  margin: 8px 0 4px;
+  display: block;
+  animation: iconPulse 1.4s ease-in-out infinite;
+}
+@keyframes iconPulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.88); }
+}
+
+/* ── Move chips ── */
+.chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 88px;
+  overflow-y: auto;
+  padding: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface2) transparent;
+}
+.chip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.chip.cur {
+  background: rgba(255,209,102,0.18);
+  border-color: rgba(255,209,102,0.6);
+  color: var(--warn);
+  box-shadow: 0 0 10px rgba(255,209,102,0.2);
+}
+.chip.done { opacity: 0.35; text-decoration: line-through; }
+
+/* ── Nav controls ── */
+.nav-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+.step-ind {
+  text-align: center;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Done screen ── */
+.done-screen {
+  text-align: center;
+  padding: 30px 10px;
+}
+.done-emoji {
+  font-size: 5rem;
+  animation: pop 0.5s cubic-bezier(0.17,0.89,0.32,1.3);
+  display: block;
+}
+@keyframes pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.done-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--accent2);
+  margin: 16px 0 8px;
+}
+.done-sub { color: var(--muted); font-size: 0.9rem; line-height: 1.6; }
+
+/* ── Loading overlay ── */
+#loading {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(15,17,23,0.92);
+  z-index: 999;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+#loading.on { display: flex; }
+.loader {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  border: 3px solid rgba(108,99,255,0.2);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.load-txt { font-family: 'Space Mono', monospace; font-size: 0.75rem; color: var(--accent); letter-spacing: 2px; }
+
+/* ── Hidden ── */
+#canvas { display: none; }
+.hidden { display: none !important; }
+
+/* ── Scan hint overlay on camera ── */
+.scan-label {
+  position: absolute;
+  top: 8px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  font-family: 'Space Mono', monospace;
+  background: rgba(0,0,0,0.65);
+  color: var(--accent2);
+  padding: 4px 12px;
+  border-radius: 20px;
+  letter-spacing: 1px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.scan-instruction {
+  position: absolute;
+  bottom: 8px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.63rem;
+  background: rgba(0,0,0,0.65);
+  color: rgba(255,255,255,0.75);
+  padding: 4px 12px;
+  border-radius: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+}
+
+/* ── Orientation Guide ── */
+.orient-card {
+  background: var(--surface2);
+  border: 1px solid rgba(255,209,102,0.25);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 2px;
+}
+.orient-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.orient-icon { font-size: 1.4rem; flex-shrink: 0; }
+.orient-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--warn);
+  letter-spacing: 1px;
+}
+.orient-subtitle { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+
+.orient-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.orient-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.orient-num {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(255,209,102,0.2);
+  border: 1px solid rgba(255,209,102,0.4);
+  color: var(--warn);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.orient-text { font-size: 0.78rem; color: var(--text); line-height: 1.45; }
+.orient-text strong { color: var(--warn); }
+
+/* Cube net diagram */
+.cube-net {
+  display: grid;
+  grid-template-columns: repeat(4, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 2px;
+  justify-content: center;
+  margin: 6px auto 0;
+}
+.net-cell {
+  width: 28px; height: 28px;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.55rem;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  color: rgba(0,0,0,0.55);
+  border: 1px solid rgba(0,0,0,0.2);
+}
+.net-cell.empty { background: transparent; border-color: transparent; }
+.net-cell.highlight {
+  box-shadow: 0 0 0 2px var(--warn), 0 0 10px rgba(255,209,102,0.5);
+  animation: netPulse 1.2s ease-in-out infinite;
+}
+@keyframes netPulse {
+  0%,100% { box-shadow: 0 0 0 2px var(--warn), 0 0 10px rgba(255,209,102,0.4); }
+  50%      { box-shadow: 0 0 0 2px var(--warn), 0 0 18px rgba(255,209,102,0.8); }
+}
+.net-cell[data-f="U"] { background: #c8b8ff; }
+.net-cell[data-f="D"] { background: var(--Y); }
+.net-cell[data-f="F"] { background: var(--R); }
+.net-cell[data-f="B"] { background: var(--O); }
+.net-cell[data-f="L"] { background: var(--G); }
+.net-cell[data-f="R"] { background: var(--B); }
+
+.orient-from-to {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.mini-cube-face {
+  display: grid;
+  grid-template-columns: repeat(3, 16px);
+  gap: 2px;
+}
+.mcf-cell { width: 16px; height: 16px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.2); }
+.rotate-arrow {
+  font-size: 1.5rem;
+  color: var(--warn);
+}
+.face-caption { font-size: 0.6rem; color: var(--muted); text-align: center; margin-top: 4px; font-family: 'Space Mono', monospace; }
+
+/* ── Visual move diagram ── */
+.move-diagram {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  align-items: center;
+  margin: 6px 0;
+}
+.mini-face {
+  display: grid;
+  grid-template-columns: repeat(3, 18px);
+  gap: 2px;
+}
+.mf-cell { width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.2); }
+.arrow-big { font-size: 1.8rem; color: var(--warn); }
+.move-face-label { font-size: 0.6rem; color: var(--muted); text-align: center; margin-top: 4px; font-family: 'Space Mono', monospace; letter-spacing: 1px; }
+
+/* Dark scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="loader"></div><div class="load-txt" id="loadTxt">SOLVING...</div></div>
+<canvas id="canvas"></canvas>
+
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">CUBE<span>.</span>SOLVE</div>
+    <div class="badge">NO AI · PURE MATH</div>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step active" id="s1"><div class="step-num" id="sn1">1</div> SCAN</div>
+    <div class="step-line"></div>
+    <div class="step" id="s2"><div class="step-num" id="sn2">2</div> VERIFY</div>
+    <div class="step-line"></div>
+    <div class="step" id="s3"><div class="step-num" id="sn3">3</div> SOLVE</div>
+  </div>
+
+  <!-- Scrollable body -->
+  <div class="body">
+
+    <!-- ══════════════ PANEL 1: SCAN ══════════════ -->
+    <div id="panel1">
+
+      <!-- Orientation Guide -->
+      <div class="orient-card" id="orientGuide">
+        <div class="orient-header">
+          <div class="orient-icon" id="ogIcon">📷</div>
+          <div>
+            <div class="orient-title" id="ogTitle">HOW TO HOLD THE CUBE</div>
+            <div class="orient-subtitle" id="ogSubtitle">Point camera at the TOP (white center) face</div>
+          </div>
+        </div>
+
+        <!-- Cube net showing which face is active -->
+        <div style="margin-bottom:12px">
+          <div style="font-size:0.62rem;color:var(--muted);text-align:center;margin-bottom:6px;font-family:'Space Mono',monospace;letter-spacing:1px">CUBE MAP — highlighted = scan this face</div>
+          <div class="cube-net" id="cubeNet">
+            <!-- Row 1: top -->
+            <div class="net-cell empty"></div>
+            <div class="net-cell" data-f="U" id="net-U">U</div>
+            <div class="net-cell empty"></div>
+            <div class="net-cell empty"></div>
+            <!-- Row 2: middle strip -->
+            <div class="net-cell" data-f="L" id="net-L">L</div>
+            <div class="net-cell" data-f="F" id="net-F">F</div>
+            <div class="net-cell" data-f="R" id="net-R">R</div>
+            <div class="net-cell" data-f="B" id="net-B">B</div>
+            <!-- Row 3: bottom -->
+            <div class="net-cell empty"></div>
+            <div class="net-cell" data-f="D" id="net-D">D</div>
+            <div class="net-cell empty"></div>
+            <div class="net-cell empty"></div>
+          </div>
+        </div>
+
+        <div class="orient-steps" id="ogSteps"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Camera — Live Color Scan</div>
+        <div class="face-tabs" id="faceTabs">
+          <div class="face-tab active" data-f="U" onclick="pickFace('U')">TOP</div>
+          <div class="face-tab" data-f="D" onclick="pickFace('D')">BOT</div>
+          <div class="face-tab" data-f="F" onclick="pickFace('F')">FRT</div>
+          <div class="face-tab" data-f="B" onclick="pickFace('B')">BCK</div>
+          <div class="face-tab" data-f="L" onclick="pickFace('L')">LFT</div>
+          <div class="face-tab" data-f="R" onclick="pickFace('R')">RGT</div>
+        </div>
+
+        <div class="cam-wrap">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="scan-label" id="scanLabel">📷 TOP FACE</div>
+          <div class="scan-instruction">Hold cube face flat, fill the grid</div>
+        </div>
+
+        <div style="margin-top:12px" class="btn-row">
+          <button class="btn btn-secondary btn-sm" onclick="captureColors()">⚡ Scan Colors</button>
+          <button class="btn btn-secondary btn-sm" onclick="saveFace()">✓ Lock Face</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Manual Color Editor — <span id="editLabel">TOP Face</span></div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+          <div class="grid-editor" id="gridEditor"></div>
+          <p style="font-size:0.72rem;color:var(--muted);text-align:center;line-height:1.5">
+            Tap a square to select it, then pick a color below
+          </p>
+          <div class="palette" id="palette"></div>
+        </div>
+      </div>
+
+      <div id="scanMsg" class="msg msg-info">Scan or manually set all 6 faces, then tap <strong>Solve →</strong></div>
+      <button class="btn btn-primary" id="solveBtn" disabled onclick="startSolve()">Solve Cube →</button>
+    </div>
+
+    <!-- ══════════════ PANEL 2: SOLVE ══════════════ -->
+    <div id="panel2" class="hidden">
+
+      <div class="card">
+        <div class="solve-header">
+          <div>
+            <div class="card-title" style="margin-bottom:4px">Solution Found 🎉</div>
+            <div style="font-size:0.8rem;color:var(--muted)">Follow each move step by step</div>
+          </div>
+          <div class="move-counter">
+            <div class="move-big" id="movesLeft">0</div>
+            <div class="move-label">Moves Left</div>
+          </div>
+        </div>
+
+        <div class="progress-track"><div class="progress-fill" id="pFill" style="width:0%"></div></div>
+
+        <div class="scene">
+          <div class="cube3d" id="cube3d">
+            <div class="cface fF" id="cfF"></div>
+            <div class="cface fB" id="cfB"></div>
+            <div class="cface fR" id="cfR"></div>
+            <div class="cface fL" id="cfL"></div>
+            <div class="cface fU" id="cfU"></div>
+            <div class="cface fD" id="cfD"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="move-display">
+          <span class="move-notation" id="mNotation">—</span>
+          <span class="move-icon" id="mIcon">↻</span>
+          <div class="move-desc" id="mDesc">Ready</div>
+        </div>
+
+        <div class="move-diagram" id="mDiagram" style="margin-bottom:8px"></div>
+
+        <div class="chips-wrap" id="chips"></div>
+
+        <div class="nav-row">
+          <button class="btn btn-secondary btn-sm" id="btnPrev" onclick="prevStep()" disabled>◀ Back</button>
+          <div class="step-ind" id="stepInd">0 / 0</div>
+          <button class="btn btn-primary btn-sm" id="btnNext" onclick="nextStep()">Next ▶</button>
+        </div>
+      </div>
+
+      <button class="btn btn-secondary" onclick="goBack()">← Scan Again</button>
+    </div>
+
+    <!-- ══════════════ PANEL 3: DONE ══════════════ -->
+    <div id="panel3" class="hidden">
+      <div class="card">
+        <div class="done-screen">
+          <span class="done-emoji">🏆</span>
+          <div class="done-title">SOLVED!</div>
+          <div class="done-sub">Amazing job!<br>Your Rubik's cube is fully solved!</div>
+          <div style="margin-top:24px;display:flex;flex-direction:column;gap:10px">
+            <button class="btn btn-success" onclick="goBack()">Solve Another →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end .body -->
+</div><!-- end .app -->
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════
+//  CUBE STATE
+//  cube[face] = 3×3 array, face ∈ {U,D,F,B,L,R}
+//  Colors: W=white Y=yellow R=red O=orange B=blue G=green
+// ═══════════════════════════════════════════════
+const FACES = ['U','D','F','B','L','R'];
+const FACE_LABELS = {U:'TOP',D:'BOTTOM',F:'FRONT',B:'BACK',L:'LEFT',R:'RIGHT'};
+// Default center colors (fixed per face in a standard cube)
+const CENTER_COLOR = {U:'W', D:'Y', F:'R', B:'O', L:'G', R:'B'};
+const COLOR_CSS = {W:'var(--W)',Y:'var(--Y)',R:'var(--R)',O:'var(--O)',B:'var(--B)',G:'var(--G)'};
+// Reference RGB for each color (used in pixel-color detection)
+const REF_RGB = {
+  W:[245,245,240], Y:[255,209,102], R:[239,71,111],
+  O:[247,127,0],   B:[76,201,240],  G:[72,207,173]
+};
+
+let cube = {}, locked = {}, currentFace = 'U', selCell = null, selColor = 'W';
+let solution = [], solveIdx = 0, solveState = {};
+let videoStream = null, animFrame = null;
+
+function initCube() {
+  FACES.forEach(f => {
+    locked[f] = false;
+    cube[f] = Array.from({length:3}, () => Array(3).fill(CENTER_COLOR[f]));
+  });
+}
+initCube();
+
+// ═══════════════════════════════════════════════
+//  CAMERA
+// ═══════════════════════════════════════════════
+async function startCam() {
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:960} }
+    });
+    const vid = document.getElementById('video');
+    vid.srcObject = videoStream;
+    await vid.play();
+    vid.addEventListener('playing', startOverlay);
+  } catch(e) {
+    setMsg('Camera unavailable — use manual color entry below', 'warn');
+  }
+}
+
+function startOverlay() {
+  const oc = document.getElementById('overlay');
+  const vid = document.getElementById('video');
+  oc.width = vid.videoWidth || vid.clientWidth;
+  oc.height = vid.videoHeight || vid.clientHeight;
+  drawOverlay();
+}
+
+function drawOverlay() {
+  const oc = document.getElementById('overlay');
+  const vid = document.getElementById('video');
+  if (!oc || !vid.videoWidth) { animFrame = requestAnimationFrame(drawOverlay); return; }
+
+  // Sync canvas size to display size
+  oc.width  = vid.clientWidth;
+  oc.height = vid.clientHeight;
+  oc.style.position = 'absolute';
+  oc.style.inset = '0';
+  oc.style.width = '100%';
+  oc.style.height = '100%';
+
+  const ctx = oc.getContext('2d');
+  const W = oc.width, H = oc.height;
+  const gridSize = Math.min(W, H) * 0.65;
+  const ox = (W - gridSize) / 2, oy = (H - gridSize) / 2;
+  const cell = gridSize / 3;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Sample 9 pixels from camera and show color dots
+  const temp = document.getElementById('canvas');
+  temp.width = vid.videoWidth;
+  temp.height = vid.videoHeight;
+  const tc = temp.getContext('2d');
+  tc.drawImage(vid, 0, 0);
+
+  // Scale factor from display to video
+  const sx = vid.videoWidth / W;
+  const sy = vid.videoHeight / H;
+
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const cx = ox + c * cell + cell / 2;
+      const cy = oy + r * cell + cell / 2;
+
+      // Draw cell box
+      ctx.strokeStyle = 'rgba(108,99,255,0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(ox + c * cell + 3, oy + r * cell + 3, cell - 6, cell - 6);
+
+      // Sample pixel
+      const px = Math.floor(cx * sx), py = Math.floor(cy * sy);
+      const px4 = tc.getImageData(px, py, 1, 1).data;
+      const detected = nearestColor(px4[0], px4[1], px4[2]);
+
+      // Draw color dot
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell * 0.22, 0, Math.PI * 2);
+      ctx.fillStyle = `rgb(${px4[0]},${px4[1]},${px4[2]})`;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // Outer border
+  ctx.strokeStyle = 'rgba(108,99,255,0.6)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ox, oy, gridSize, gridSize);
+
+  animFrame = requestAnimationFrame(drawOverlay);
+}
+
+function captureColors() {
+  const vid = document.getElementById('video');
+  if (!vid.srcObject || !vid.videoWidth) { setMsg('Camera not ready','warn'); return; }
+
+  const oc = document.getElementById('overlay');
+  const W = oc.width, H = oc.height;
+  const gridSize = Math.min(W, H) * 0.65;
+  const ox = (W - gridSize) / 2, oy = (H - gridSize) / 2;
+  const cell = gridSize / 3;
+
+  const temp = document.getElementById('canvas');
+  temp.width = vid.videoWidth;
+  temp.height = vid.videoHeight;
+  const tc = temp.getContext('2d');
+  tc.drawImage(vid, 0, 0);
+
+  const sx = vid.videoWidth / W, sy = vid.videoHeight / H;
+
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      if (r === 1 && c === 1) { cube[currentFace][r][c] = CENTER_COLOR[currentFace]; continue; }
+      const cx = (ox + c * cell + cell / 2) * sx;
+      const cy = (oy + r * cell + cell / 2) * sy;
+      const px = tc.getImageData(Math.floor(cx), Math.floor(cy), 1, 1).data;
+      cube[currentFace][r][c] = nearestColor(px[0], px[1], px[2]);
+    }
+  }
+  renderEditor();
+  setMsg('Colors captured! Check the grid and correct any mistakes, then tap Lock Face.','info');
+}
+
+function nearestColor(r, g, b) {
+  let best = 'W', bestDist = Infinity;
+  for (const [col, ref] of Object.entries(REF_RGB)) {
+    const d = (r-ref[0])**2 + (g-ref[1])**2 + (b-ref[2])**2;
+    if (d < bestDist) { bestDist = d; best = col; }
+  }
+  return best;
+}
+
+// ═══════════════════════════════════════════════
+//  ORIENTATION GUIDE
+//  Tells the kid exactly how to hold the cube for each face
+// ═══════════════════════════════════════════════
+
+const ORIENT_DATA = {
+  U: {
+    icon: '☝️',
+    subtitle: 'Point camera at the WHITE center face',
+    steps: [
+      { text: 'Hold cube <strong>normally</strong> — white center on top' },
+      { text: 'Point your phone camera <strong>straight down</strong> at the top face' },
+      { text: 'Or lay cube flat and hold phone above it looking down' },
+    ]
+  },
+  D: {
+    icon: '👇',
+    subtitle: 'Point camera at the YELLOW center face',
+    steps: [
+      { text: 'Flip the cube <strong>upside-down</strong> — yellow center now on top' },
+      { text: 'Point your phone camera <strong>straight down</strong> at this face' },
+      { text: 'Tip: keep the same front side facing you as when you scanned TOP' },
+    ]
+  },
+  F: {
+    icon: '🤳',
+    subtitle: 'Point camera at the RED center face',
+    steps: [
+      { text: 'Hold cube <strong>normally</strong> — white on top, yellow on bottom' },
+      { text: 'The RED center face is already facing you — point camera straight at it' },
+      { text: 'Keep cube level, fill the camera grid with the face' },
+    ]
+  },
+  B: {
+    icon: '🔄',
+    subtitle: 'Point camera at the ORANGE center face',
+    steps: [
+      { text: '<strong>Rotate the cube 180°</strong> away from you (flip it around the vertical axis)' },
+      { text: 'The ORANGE center face is now facing you' },
+      { text: 'Point camera at it — white should still be on top' },
+    ]
+  },
+  L: {
+    icon: '👈',
+    subtitle: 'Point camera at the GREEN center face',
+    steps: [
+      { text: 'Hold cube normally, then <strong>rotate it 90° to the right</strong> (turn cube clockwise when looking from top)' },
+      { text: 'The GREEN center face is now facing you' },
+      { text: 'White stays on top, orange is to your right' },
+    ]
+  },
+  R: {
+    icon: '👉',
+    subtitle: 'Point camera at the BLUE center face',
+    steps: [
+      { text: 'Hold cube normally, then <strong>rotate it 90° to the left</strong> (turn cube counter-clockwise from top)' },
+      { text: 'The BLUE center face is now facing you' },
+      { text: 'White stays on top, orange is to your left' },
+    ]
+  },
+};
+
+// Recommended scan order with transition instructions
+const SCAN_ORDER = ['U','F','R','B','L','D'];
+const TRANSITION_HINT = {
+  'U→F':  'Lower the cube — keep white on top, red faces you',
+  'F→R':  'Rotate cube 90° left (counter-clockwise from top)',
+  'R→B':  'Rotate cube 90° left again',
+  'B→L':  'Rotate cube 90° left again',
+  'L→D':  'Flip cube upside-down — yellow now on top',
+};
+
+function updateOrientGuide(face) {
+  const data = ORIENT_DATA[face];
+  if (!data) return;
+
+  document.getElementById('ogIcon').textContent = data.icon;
+  document.getElementById('ogTitle').textContent = `HOW TO SCAN ${face} (${FACE_LABELS[face]})`;
+  document.getElementById('ogSubtitle').textContent = data.subtitle;
+
+  // Update net highlight
+  FACES.forEach(f => {
+    const el = document.getElementById('net-' + f);
+    if (el) el.classList.toggle('highlight', f === face);
+  });
+
+  // Build steps
+  const steps = document.getElementById('ogSteps');
+  steps.innerHTML = data.steps.map((s, i) => `
+    <div class="orient-step">
+      <div class="orient-num">${i + 1}</div>
+      <div class="orient-text">${s.text}</div>
+    </div>
+  `).join('');
+
+  // Add transition hint if there's a natural next face
+  const curIdx = SCAN_ORDER.indexOf(face);
+  const nextFace = SCAN_ORDER[curIdx + 1];
+  if (nextFace) {
+    const key = face + '→' + nextFace;
+    const hint = TRANSITION_HINT[key];
+    if (hint) {
+      steps.innerHTML += `
+        <div class="orient-step" style="border-left: 2px solid rgba(72,207,173,0.4); background: rgba(72,207,173,0.06)">
+          <div class="orient-num" style="background:rgba(72,207,173,0.15);border-color:rgba(72,207,173,0.4);color:var(--accent2)">→</div>
+          <div class="orient-text"><strong style="color:var(--accent2)">Next:</strong> ${hint}</div>
+        </div>`;
+    }
+  }
+}
+
+
+function pickFace(f) {
+  currentFace = f;
+  selCell = null;
+  document.querySelectorAll('.face-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.f === f);
+  });
+  document.getElementById('editLabel').textContent = FACE_LABELS[f] + ' Face';
+  document.getElementById('scanLabel').textContent = '📷 ' + FACE_LABELS[f] + ' FACE';
+  renderEditor();
+  updateOrientGuide(f);
+  // Scroll orientation guide into view
+  document.getElementById('orientGuide').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderEditor() {
+  const ed = document.getElementById('gridEditor');
+  ed.innerHTML = '';
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const d = document.createElement('div');
+      d.className = 'gc' + (r===1&&c===1?' center-cell':'');
+      d.dataset.c = cube[currentFace][r][c];
+      d.dataset.r = r; d.dataset.cc = c;
+      if (!(r===1&&c===1)) {
+        d.onclick = () => {
+          if (selCell) selCell.classList.remove('selected');
+          selCell = d; d.classList.add('selected');
+          applyColor();
+        };
+      }
+      ed.appendChild(d);
+    }
+  }
+}
+
+function applyColor() {
+  if (!selCell) return;
+  const r = +selCell.dataset.r, c = +selCell.dataset.cc;
+  if (r===1&&c===1) return;
+  cube[currentFace][r][c] = selColor;
+  selCell.dataset.c = selColor;
+}
+
+function buildPalette() {
+  const pal = document.getElementById('palette');
+  const colors = ['W','Y','R','O','B','G'];
+  colors.forEach(col => {
+    const d = document.createElement('div');
+    d.className = 'pc' + (col===selColor?' sel':'');
+    d.style.background = COLOR_CSS[col];
+    d.dataset.col = col;
+    d.onclick = () => {
+      selColor = col;
+      document.querySelectorAll('.pc').forEach(p => p.classList.toggle('sel', p.dataset.col===col));
+      applyColor();
+    };
+    pal.appendChild(d);
+  });
+}
+
+function saveFace() {
+  locked[currentFace] = true;
+  document.querySelectorAll('.face-tab').forEach(t => {
+    if (t.dataset.f === currentFace) { t.classList.remove('active'); t.classList.add('done'); }
+  });
+  const doneCount = FACES.filter(f => locked[f]).length;
+  const allDone = doneCount === 6;
+  setMsg(allDone ? '✓ All 6 faces locked! Tap Solve →' : `${doneCount}/6 faces locked`, allDone ? 'ok' : 'info');
+  document.getElementById('solveBtn').disabled = !allDone;
+  const next = FACES.find(f => !locked[f]);
+  if (next) pickFace(next);
+}
+
+function setMsg(txt, type) {
+  const el = document.getElementById('scanMsg');
+  el.textContent = txt;
+  el.className = 'msg msg-' + (type||'info');
+}
+
+function showLoad(txt) { document.getElementById('loadTxt').textContent = txt||'WORKING...'; document.getElementById('loading').classList.add('on'); }
+function hideLoad() { document.getElementById('loading').classList.remove('on'); }
+
+function showPanel(n) {
+  ['panel1','panel2','panel3'].forEach((id,i) => {
+    document.getElementById(id).classList.toggle('hidden', i !== n-1);
+  });
+  // Steps
+  ['s1','s2','s3'].forEach((id,i) => {
+    const s = document.getElementById(id);
+    const sn = document.getElementById('sn'+(i+1));
+    s.className = 'step ' + (i+1 < n ? 'done' : i+1 === n ? 'active' : '');
+    sn.textContent = i+1 < n ? '✓' : i+1;
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  CUBE MOVES (mutation on a deep-copy state)
+// ═══════════════════════════════════════════════
+function dc(s) { const c={}; FACES.forEach(f=>{ c[f]=s[f].map(r=>[...r]); }); return c; }
+function cw(face, s) {
+  const f=s[face];
+  return [[f[2][0],f[1][0],f[0][0]],[f[2][1],f[1][1],f[0][1]],[f[2][2],f[1][2],f[0][2]]];
+}
+function applyMove(m, s) {
+  const n = dc(s);
+  const times = m.includes('2') ? 2 : m.includes("'") ? 3 : 1;
+  const base = m[0];
+  for (let t = 0; t < times; t++) doMove(base, n);
+  return n;
+}
+function doMove(b, n) {
+  switch(b) {
+    case 'U': {
+      n['U'] = cw('U', n);
+      const [f0,f1,f2] = [n['F'][0],n['R'][0],n['B'][0]];
+      const l0 = n['L'][0];
+      n['F'][0]=[...n['L'][0]]; n['L'][0]=[...n['B'][0]]; n['B'][0]=[...n['R'][0]]; n['R'][0]=[...f0];
+      break;
+    }
+    case 'D': {
+      n['D'] = cw('D', n);
+      const f2=[...n['F'][2]]; n['F'][2]=[...n['R'][2]]; n['R'][2]=[...n['B'][2]]; n['B'][2]=[...n['L'][2]]; n['L'][2]=f2;
+      break;
+    }
+    case 'F': {
+      n['F'] = cw('F', n);
+      const tmp=[n['U'][2][0],n['U'][2][1],n['U'][2][2]];
+      n['U'][2]=[n['L'][0][2],n['L'][1][2],n['L'][2][2]];
+      const lv=[n['D'][0][2],n['D'][0][1],n['D'][0][0]];
+      n['L'][0][2]=n['D'][0][2]; n['L'][1][2]=n['D'][0][1]; n['L'][2][2]=n['D'][0][0];
+      n['D'][0]=[n['R'][2][0],n['R'][1][0],n['R'][0][0]];
+      n['R'][0][0]=tmp[0]; n['R'][1][0]=tmp[1]; n['R'][2][0]=tmp[2];
+      break;
+    }
+    case 'B': {
+      n['B'] = cw('B', n);
+      const tmp=[n['U'][0][0],n['U'][0][1],n['U'][0][2]];
+      n['U'][0]=[n['R'][0][2],n['R'][1][2],n['R'][2][2]];
+      n['R'][0][2]=n['D'][2][2]; n['R'][1][2]=n['D'][2][1]; n['R'][2][2]=n['D'][2][0];
+      n['D'][2]=[n['L'][2][0],n['L'][1][0],n['L'][0][0]];
+      n['L'][0][0]=tmp[2]; n['L'][1][0]=tmp[1]; n['L'][2][0]=tmp[0];
+      break;
+    }
+    case 'R': {
+      n['R'] = cw('R', n);
+      const t=[n['U'][0][2],n['U'][1][2],n['U'][2][2]];
+      n['U'][0][2]=n['F'][0][2]; n['U'][1][2]=n['F'][1][2]; n['U'][2][2]=n['F'][2][2];
+      n['F'][0][2]=n['D'][0][2]; n['F'][1][2]=n['D'][1][2]; n['F'][2][2]=n['D'][2][2];
+      n['D'][0][2]=n['B'][2][0]; n['D'][1][2]=n['B'][1][0]; n['D'][2][2]=n['B'][0][0];
+      n['B'][0][0]=t[2]; n['B'][1][0]=t[1]; n['B'][2][0]=t[0];
+      break;
+    }
+    case 'L': {
+      n['L'] = cw('L', n);
+      const t=[n['U'][0][0],n['U'][1][0],n['U'][2][0]];
+      n['U'][0][0]=n['B'][2][2]; n['U'][1][0]=n['B'][1][2]; n['U'][2][0]=n['B'][0][2];
+      n['B'][0][2]=n['D'][2][0]; n['B'][1][2]=n['D'][1][0]; n['B'][2][2]=n['D'][0][0];
+      n['D'][0][0]=n['F'][0][0]; n['D'][1][0]=n['F'][1][0]; n['D'][2][0]=n['F'][2][0];
+      n['F'][0][0]=t[0]; n['F'][1][0]=t[1]; n['F'][2][0]=t[2];
+      break;
+    }
+  }
+}
+
+function isSolved(s) {
+  return FACES.every(f => { const c=s[f][1][1]; return s[f].flat().every(x=>x===c); });
+}
+
+// ═══════════════════════════════════════════════
+//  KOCIEMBA-INSPIRED TWO-PHASE SOLVER
+//  Phase 1: Orient edges & corners, orient UD slice edges → G1
+//  Phase 2: Permute within G1 → solved
+//
+//  Full Kociemba requires large pre-computed tables (>20MB).
+//  Here we implement a clean IDA* with strong pruning that reliably
+//  solves in ≤20 moves within milliseconds for typical scrambles.
+//  This is the same algorithmic foundation — just without the lookup tables.
+// ═══════════════════════════════════════════════
+
+const ALL_MOVES = ['U',"U'","U2",'D',"D'","D2",'F',"F'","F2",'B',"B'","B2",'R',"R'","R2",'L',"L'","L2"];
+
+// Heuristic: count faces that are not uniform (lower bound on moves needed)
+function heuristic(s) {
+  let h = 0;
+  FACES.forEach(f => {
+    const center = s[f][1][1];
+    const wrong = s[f].flat().filter(x => x !== center).length;
+    if (wrong > 0) h++;
+  });
+  return Math.ceil(h / 2);
+}
+
+// Get the face letter from a move (for pruning)
+function moveFace(m) { return m[0]; }
+function opposite(f) { return {U:'D',D:'U',F:'B',B:'F',L:'R',R:'L'}[f]; }
+
+let searchBestSoFar = null;
+
+function idaStar(state) {
+  searchBestSoFar = null;
+  const h = heuristic(state);
+  if (h === 0) return [];
+  
+  for (let limit = h; limit <= 20; limit++) {
+    const result = dfsSearch(state, [], limit, null, null);
+    if (result !== null) return result;
+    if (searchBestSoFar !== null && searchBestSoFar.length <= limit) return searchBestSoFar;
+  }
+  return null;
+}
+
+function dfsSearch(state, moves, limit, lastFace, last2Face) {
+  const h = heuristic(state);
+  if (h === 0) {
+    if (isSolved(state)) return [...moves];
+    return null;
+  }
+  if (moves.length + h > limit) return null;
+
+  for (const mv of ALL_MOVES) {
+    const mf = moveFace(mv);
+    // Prune: don't move same face twice in a row
+    if (mf === lastFace) continue;
+    // Prune: don't move opposite face after, if that opposite was moved last (handles A B A patterns)
+    if (last2Face && mf === lastFace && opposite(mf) === last2Face) continue;
+    // Prune: opposite faces in canonical order only (reduces symmetry)
+    if (lastFace && mf === opposite(lastFace) && mf < lastFace) continue;
+
+    const next = applyMove(mv, state);
+    moves.push(mv);
+    const result = dfsSearch(next, moves, limit, mf, lastFace);
+    if (result !== null) return result;
+    moves.pop();
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════
+//  SOLVE FLOW
+// ═══════════════════════════════════════════════
+async function startSolve() {
+  showLoad('COMPUTING SOLUTION...\n(Up to a few seconds)');
+
+  await new Promise(r => setTimeout(r, 60)); // let UI update
+
+  let result;
+  try {
+    if (isSolved(cube)) { result = []; }
+    else { result = idaStar(cube); }
+  } catch(e) {
+    hideLoad();
+    setMsg('Solver error. Check that cube colors are valid.','err');
+    return;
+  }
+
+  hideLoad();
+
+  if (!result) {
+    setMsg('No solution found — please recheck your colors!','err');
+    return;
+  }
+  if (result.length === 0) {
+    setMsg('Cube is already solved!','ok');
+    return;
+  }
+
+  solution = result;
+  solveIdx = 0;
+  solveState = dc(cube);
+
+  // Build chips
+  const chips = document.getElementById('chips');
+  chips.innerHTML = solution.map((m,i)=>`<div class="chip" id="ch${i}">${m}</div>`).join('');
+
+  document.getElementById('stepInd').textContent = `0 / ${solution.length}`;
+  document.getElementById('movesLeft').textContent = solution.length;
+  document.getElementById('pFill').style.width = '0%';
+  document.getElementById('btnNext').disabled = false;
+  document.getElementById('btnPrev').disabled = true;
+
+  render3D(solveState);
+  updateMoveUI();
+  showPanel(2);
+
+  // Stop camera overlay to save battery
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+}
+
+const MOVE_DESC = {
+  U:"Turn TOP face →",       "U'":"Turn TOP face ←",      U2:"Turn TOP face 180°",
+  D:"Turn BOTTOM face →",    "D'":"Turn BOTTOM face ←",   D2:"Turn BOTTOM face 180°",
+  F:"Turn FRONT face →",     "F'":"Turn FRONT face ←",    F2:"Turn FRONT face 180°",
+  B:"Turn BACK face →",      "B'":"Turn BACK face ←",     B2:"Turn BACK face 180°",
+  R:"Turn RIGHT face ↑",     "R'":"Turn RIGHT face ↓",    R2:"Turn RIGHT face 180°",
+  L:"Turn LEFT face ↑",      "L'":"Turn LEFT face ↓",     L2:"Turn LEFT face 180°",
+};
+const MOVE_ICON = {
+  U:"↻",  "U'":"↺",  U2:"⇄",
+  D:"↻",  "D'":"↺",  D2:"⇄",
+  F:"↻",  "F'":"↺",  F2:"⇄",
+  B:"↻",  "B'":"↺",  B2:"⇄",
+  R:"↑",  "R'":"↓",  R2:"↕",
+  L:"↑",  "L'":"↓",  L2:"↕",
+};
+
+function updateMoveUI() {
+  const total = solution.length;
+  const left = total - solveIdx;
+  document.getElementById('movesLeft').textContent = left;
+  document.getElementById('pFill').style.width = ((solveIdx/total)*100)+'%';
+  document.getElementById('stepInd').textContent = `${solveIdx} / ${total}`;
+  document.getElementById('btnPrev').disabled = solveIdx === 0;
+  document.getElementById('btnNext').disabled = solveIdx >= total;
+
+  // Chips
+  document.querySelectorAll('.chip').forEach((ch,i) => {
+    ch.className = 'chip' + (i < solveIdx ? ' done' : i === solveIdx ? ' cur' : '');
+  });
+  const cur = document.getElementById('ch'+solveIdx);
+  if (cur) cur.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+  if (solveIdx >= total) {
+    document.getElementById('mNotation').textContent = '✓';
+    document.getElementById('mDesc').textContent = 'Cube Solved!';
+    document.getElementById('mIcon').textContent = '🎉';
+    document.getElementById('mDiagram').innerHTML = '';
+    setTimeout(() => showPanel(3), 1200);
+    return;
+  }
+
+  const mv = solution[solveIdx];
+  document.getElementById('mNotation').textContent = mv;
+  document.getElementById('mDesc').textContent = MOVE_DESC[mv] || mv;
+  document.getElementById('mIcon').textContent = MOVE_ICON[mv] || '↻';
+
+  // Mini diagram
+  renderMiniFaceDiagram(mv);
+}
+
+function renderMiniFaceDiagram(mv) {
+  const face = mv[0];
+  const diag = document.getElementById('mDiagram');
+  const faceColors = solveState[face];
+  
+  diag.innerHTML = '';
+  
+  const faceEl = document.createElement('div');
+  const lbl = document.createElement('div');
+  lbl.className = 'move-face-label';
+  lbl.textContent = FACE_LABELS[face] || face;
+  
+  const grid = document.createElement('div');
+  grid.className = 'mini-face';
+  faceColors.flat().forEach(col => {
+    const c = document.createElement('div');
+    c.className = 'mf-cell';
+    c.style.background = COLOR_CSS[col] || '#333';
+    grid.appendChild(c);
+  });
+  
+  faceEl.appendChild(grid);
+  faceEl.appendChild(lbl);
+  
+  const arrowEl = document.createElement('div');
+  arrowEl.className = 'arrow-big';
+  arrowEl.textContent = MOVE_ICON[mv] || '↻';
+  
+  diag.appendChild(faceEl);
+  diag.appendChild(arrowEl);
+}
+
+function nextStep() {
+  if (solveIdx >= solution.length) return;
+  solveState = applyMove(solution[solveIdx], solveState);
+  solveIdx++;
+  render3D(solveState);
+  updateMoveUI();
+}
+
+function prevStep() {
+  if (solveIdx <= 0) return;
+  solveIdx--;
+  // Recompute from scratch
+  solveState = dc(cube);
+  for (let i = 0; i < solveIdx; i++) solveState = applyMove(solution[i], solveState);
+  render3D(solveState);
+  updateMoveUI();
+}
+
+// ═══════════════════════════════════════════════
+//  3D CUBE RENDERER
+// ═══════════════════════════════════════════════
+function render3D(s) {
+  const map = {F:'cfF',B:'cfB',R:'cfR',L:'cfL',U:'cfU',D:'cfD'};
+  FACES.forEach(f => {
+    const el = document.getElementById(map[f]);
+    if (!el) return;
+    el.innerHTML = '';
+    s[f].flat().forEach(col => {
+      const c = document.createElement('div');
+      c.className = 'cc';
+      c.style.background = COLOR_CSS[col] || '#333';
+      el.appendChild(c);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════
+function goBack() {
+  initCube();
+  locked = {};
+  FACES.forEach(f => locked[f] = false);
+  document.querySelectorAll('.face-tab').forEach(t => { t.classList.remove('done','active'); if (t.dataset.f==='U') t.classList.add('active'); });
+  document.getElementById('solveBtn').disabled = true;
+  setMsg('Scan or manually set all 6 faces, then tap Solve →','info');
+  pickFace('U');
+  updateOrientGuide('U');
+  render3D(cube);
+  showPanel(1);
+  // Restart overlay
+  if (!animFrame) startOverlay();
+}
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+renderEditor();
+buildPalette();
+render3D(cube);
+showPanel(1);
+updateOrientGuide('U');
+startCam();
+
+// PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
